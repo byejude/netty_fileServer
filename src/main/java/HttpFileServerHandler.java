@@ -22,6 +22,7 @@ import static io.netty.handler.codec.http.HttpHeaders.Names.LOCATION;
 import static io.netty.handler.codec.http.HttpHeaders.Values.KEEP_ALIVE;
 import static io.netty.handler.codec.http.HttpHeaders.isKeepAlive;
 import static io.netty.handler.codec.http.HttpHeaders.setContentLength;
+import static io.netty.handler.codec.http.HttpMethod.GET;
 import static io.netty.handler.codec.http.HttpResponseStatus.*;
 import static io.netty.handler.codec.http.HttpVersion.HTTP_1_1;
 import static io.netty.handler.codec.http.LastHttpContent.EMPTY_LAST_CONTENT;
@@ -88,18 +89,20 @@ public class HttpFileServerHandler extends SimpleChannelInboundHandler<FullHttpR
 
         if(!file.isFile()){
             sendError(channelHandlerContext,FORBIDDEN);
+            return;
         }
 
         RandomAccessFile randomAccessFile = null;
         try {
             randomAccessFile = new RandomAccessFile(file,"r");
         } catch (FileNotFoundException e) {
-            sendError(channelHandlerContext,FORBIDDEN);
+            sendError(channelHandlerContext, NOT_FOUND);
+            return;
         }
 
         long fileLength = randomAccessFile.length();
         //创建一个默认的HTTP响应
-        HttpResponse response = new DefaultFullHttpResponse(HTTP_1_1,OK);
+        HttpResponse response = new DefaultHttpResponse(HTTP_1_1,OK);
         //设置content length
         setContentLength(response, fileLength);
         //设置content type
@@ -127,16 +130,20 @@ public class HttpFileServerHandler extends SimpleChannelInboundHandler<FullHttpR
 
             public void operationComplete(ChannelProgressiveFuture channelProgressiveFuture) throws Exception {
                 System.out.println("Transfer complete.");
+
+
             }
         });
-
-        ChannelFuture lastContentFuture = channelHandlerContext.writeAndFlush(EMPTY_LAST_CONTENT);
+        System.out.println("````");
+        ChannelFuture lastContentFuture = channelHandlerContext.writeAndFlush(LastHttpContent.EMPTY_LAST_CONTENT);
         //如果不支持keep-Alive，服务器端主动关闭请求
         if (!isKeepAlive(fullHttpRequest)) {
             lastContentFuture.addListener(ChannelFutureListener.CLOSE);
         }
 
     }
+
+
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
@@ -149,8 +156,11 @@ public class HttpFileServerHandler extends SimpleChannelInboundHandler<FullHttpR
 
     private static void sendListing(ChannelHandlerContext ctx,File dir){
         System.out.println("sendListing");
+        // 设置响应对象
         FullHttpResponse response = new DefaultFullHttpResponse(HTTP_1_1,OK);
+        // 响应头
         response.headers().set(CONTENT_TYPE,"text/html;charset=UTF-8");
+        // 追加文本内容
         StringBuilder buf = new StringBuilder();
         String dirPath = dir.getPath();
         buf.append("<!DOCTYPE html>\r\n");
@@ -199,15 +209,18 @@ public class HttpFileServerHandler extends SimpleChannelInboundHandler<FullHttpR
                 throw  new Error();
             }
         }
-
+        // 对uri进行细粒度判断：4步验证操作
+        // step 1 基础验证
         if(!uri.startsWith(url)){
             return null;
         }
+        // step 2 基础验证
         if(!uri.startsWith("/")){
             return null;
         }
-
+        // step 3 将文件分隔符替换为本地操作系统的文件路径分隔符
         uri = uri.replace('/', File.separatorChar);
+        // step 4 二次验证合法性
         if(uri.contains(File.pathSeparator+'.')
                 ||uri.contains('.'+File.separator)
                 ||uri.startsWith(".")
@@ -215,7 +228,7 @@ public class HttpFileServerHandler extends SimpleChannelInboundHandler<FullHttpR
                 ||INSECURE_URI.matcher(uri).matches()){
             return null;
         }
-
+        //当前工程所在目录 + URI构造绝对路径进行返回
         return System.getProperty("user.dir")+ File.separator+uri;
     }
 
